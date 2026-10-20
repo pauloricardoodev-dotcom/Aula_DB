@@ -1,0 +1,467 @@
+CREATE DATABASE IF NOT EXISTS db_loja;
+USE db_loja;
+
+CREATE TABLE IF NOT EXISTS clientes (
+    id INT PRIMARY KEY,
+    nome VARCHAR(255),
+    doc VARCHAR(50) NOT NULL,
+    CONSTRAINT uq_cliente_doc UNIQUE (doc)
+);
+
+CREATE TABLE IF NOT EXISTS produto (
+    id INT PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    preco DECIMAL(16,2),
+    categoria VARCHAR(255),
+    referencia INT,
+    CONSTRAINT uq_produto_referencia UNIQUE (referencia)
+);
+
+CREATE TABLE IF NOT EXISTS vendedor (
+    id INT PRIMARY KEY,
+    nome VARCHAR(255),
+    comissao DECIMAL(16,2)
+);
+
+CREATE TABLE IF NOT EXISTS estoque (
+    id INT PRIMARY KEY,
+    produtoId INT NOT NULL,
+    quantidade INT,
+    CONSTRAINT fk_estoque_produto
+        FOREIGN KEY (produtoId) REFERENCES produto(id)
+);
+
+CREATE TABLE IF NOT EXISTS pagamento (
+    id INT PRIMARY KEY,
+    metodopag VARCHAR(50),
+    state VARCHAR(50)
+);
+
+CREATE TABLE IF NOT EXISTS venda (
+    id INT PRIMARY KEY,
+    clienteId INT,
+    vendedorId INT,
+    pagamentoId INT,
+    produtoId INT,
+    CONSTRAINT fk_venda_cliente
+        FOREIGN KEY (clienteId) REFERENCES clientes(id),
+    CONSTRAINT fk_venda_vendedor
+        FOREIGN KEY (vendedorId) REFERENCES vendedor(id),
+    CONSTRAINT fk_venda_pagamento
+        FOREIGN KEY (pagamentoId) REFERENCES pagamento(id),
+    CONSTRAINT fk_venda_produto
+        FOREIGN KEY (produtoId) REFERENCES produto(id)
+);
+
+CREATE TABLE IF NOT EXISTS log_venda (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendaId INT,
+    datahora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_log_venda
+        FOREIGN KEY (vendaId) REFERENCES venda(id)
+);
+
+CREATE TABLE IF NOT EXISTS log_pagamento (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pagamentoId INT,
+    status_anterior VARCHAR(50),
+    status_novo VARCHAR(50),
+    datahora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_log_pag_pagamento
+        FOREIGN KEY (pagamentoId) REFERENCES pagamento(id)
+);
+
+DROP PROCEDURE IF EXISTS atualizar_estoque;
+
+DELIMITER //
+
+CREATE PROCEDURE atualizar_estoque(IN p_pagamentoId INT)
+BEGIN
+    DECLARE v_produtoId INT;
+
+    SELECT produtoId
+    INTO v_produtoId
+    FROM venda
+    WHERE pagamentoId = p_pagamentoId
+    LIMIT 1;
+
+    IF v_produtoId IS NOT NULL THEN
+        UPDATE estoque
+        SET quantidade = quantidade - 1
+        WHERE produtoId = v_produtoId
+        AND quantidade > 0;
+    END IF;
+END //
+
+DELIMITER ;
+
+DROP TRIGGER IF EXISTS trg_pagamento_concluido;
+
+DELIMITER //
+
+CREATE TRIGGER trg_pagamento_concluido
+AFTER UPDATE ON pagamento
+FOR EACH ROW
+BEGIN
+    IF NEW.state = 'PAGO' AND OLD.state <> 'PAGO' THEN
+
+        INSERT INTO log_pagamento (
+            pagamentoId,
+            status_anterior,
+            status_novo
+        )
+        VALUES (
+            NEW.id,
+            OLD.state,
+            NEW.state
+        );
+
+        CALL atualizar_estoque(NEW.id);
+
+    END IF;
+END //
+
+DELIMITER ;
+
+DROP TRIGGER IF EXISTS trg_venda_criada;
+
+DELIMITER //
+
+CREATE TRIGGER trg_venda_criada
+AFTER INSERT ON venda
+FOR EACH ROW
+BEGIN
+    INSERT INTO log_venda (
+        vendaId,
+        datahora
+    )
+    VALUES (
+        NEW.id,
+        NOW()
+    );
+END //
+
+DELIMITER ;
+
+INSERT IGNORE INTO clientes (id, nome, doc)
+VALUES
+    (1, 'MATHEUS PEREIRA', '123456'),
+    (2, 'PAULO RINALDI', '696969'),
+    (3, 'VITOR VENTANIA', '98754'),
+    (4, 'ENZO GOMES', '147258'),
+    (5, 'JOAO RAFAEL', '65978'),
+    (6, 'LUCAS ALVES', '69874'),
+    (7, 'DANIEL LUCAS', '963214'),
+    (8, 'VITORIA MACEDO', '451208'),
+    (9, 'ROSA MARIA', '698201'),
+    (10, 'MARCIA CRISTINA', '325874');
+
+INSERT IGNORE INTO produto (id, nome, preco, categoria, referencia)
+VALUES
+    (1, 'CAMISA', 50.00, 'ROUPA', 123),
+    (2, 'CALÇA', 100.00, 'ROUPA', 456),
+    (3, 'CAMISETA', 50.00, 'ROUPA', 789),
+    (4, 'MOLETON', 80.00, 'ROUPA', 101112),
+    (5, 'BLUSA', 110.00, 'ROUPA', 102030),
+    (6, 'SHORTS', 59.00, 'ROUPA', 405060),
+    (7, 'BERMUDA', 79.00, 'ROUPA', 708090),
+    (8, 'MEIA', 12.00, 'ROUPA', 111213),
+    (9, 'CUECA', 10.00, 'ROUPA', 141516),
+    (10, 'SOUTIEN', 69.00, 'LANGERIE', 171819);
+
+INSERT IGNORE INTO vendedor (id, nome, comissao)
+VALUES
+    (1, 'MATHEUS', 0.10),
+    (2, 'PAULO', 0.10),
+    (3, 'VITOR', 0.10),
+    (4, 'ENZO', 0.10),
+    (5, 'JOAO', 0.10),
+    (6, 'LUCAS', 0.10),
+    (7, 'DANIEL', 0.10),
+    (8, 'VITORIA', 0.10),
+    (9, 'ROSA', 0.10),
+    (10, 'MARCIA', 0.10);
+
+INSERT IGNORE INTO estoque (id, produtoId, quantidade)
+VALUES
+    (1, 1, 10),
+    (2, 2, 20),
+    (3, 3, 30),
+    (4, 4, 40),
+    (5, 5, 50),
+    (6, 6, 60),
+    (7, 7, 70),
+    (8, 8, 80),
+    (9, 9, 90),
+    (10, 10, 100);
+
+INSERT IGNORE INTO pagamento (id, metodopag, state)
+VALUES
+    (1, 'CARTÃO', 'PENDENTE'),
+    (2, 'DINHEIRO', 'PENDENTE'),
+    (3, 'PIX', 'PENDENTE'),
+    (4, 'CARTÃO', 'PENDENTE'),
+    (5, 'DINHEIRO', 'PENDENTE'),
+    (6, 'PIX', 'PENDENTE'),
+    (7, 'CARTÃO', 'CANCELADO'),
+    (8, 'DINHEIRO', 'CANCELADO'),
+    (9, 'PIX', 'CANCELADO'),
+    (10, 'CARTÃO', 'PAGO');
+
+INSERT IGNORE INTO venda (id, clienteId, vendedorId, pagamentoId, produtoId)
+VALUES
+    (1, 1, 1, 1, 1),
+    (2, 2, 2, 2, 2),
+    (3, 3, 3, 3, 3),
+    (4, 4, 4, 4, 4),
+    (5, 5, 5, 5, 5),
+    (6, 6, 6, 6, 6),
+    (7, 7, 7, 7, 7),
+    (8, 8, 8, 8, 8),
+    (9, 9, 9, 9, 9),
+    (10, 10, 10, 10, 10);
+
+UPDATE produto SET preco = 52.50 WHERE id = 1;
+UPDATE produto SET preco = 105.00 WHERE id = 2;
+UPDATE produto SET preco = 52.50 WHERE id = 3;
+UPDATE produto SET preco = 84.00 WHERE id = 4;
+UPDATE produto SET preco = 115.50 WHERE id = 5;
+UPDATE produto SET preco = 61.95 WHERE id = 6;
+UPDATE produto SET preco = 82.95 WHERE id = 7;
+UPDATE produto SET preco = 12.60 WHERE id = 8;
+UPDATE produto SET preco = 10.50 WHERE id = 9;
+UPDATE produto SET preco = 72.45 WHERE id = 10;
+
+INSERT IGNORE INTO clientes (id, nome, doc)
+VALUES
+    (11, 'TMP', '991'),
+    (12, 'TMP', '992'),
+    (13, 'TMP', '993'),
+    (14, 'TMP', '994'),
+    (15, 'TMP', '995'),
+    (16, 'TMP', '996'),
+    (17, 'TMP', '997'),
+    (18, 'TMP', '998'),
+    (19, 'TMP', '999'),
+    (20, 'TMP', '990');
+
+DELETE FROM clientes WHERE id = 11;
+DELETE FROM clientes WHERE id = 12;
+DELETE FROM clientes WHERE id = 13;
+DELETE FROM clientes WHERE id = 14;
+DELETE FROM clientes WHERE id = 15;
+DELETE FROM clientes WHERE id = 16;
+DELETE FROM clientes WHERE id = 17;
+DELETE FROM clientes WHERE id = 18;
+DELETE FROM clientes WHERE id = 19;
+DELETE FROM clientes WHERE id = 20;
+
+SELECT * FROM clientes;
+SELECT * FROM produto;
+SELECT * FROM vendedor;
+SELECT * FROM estoque;
+SELECT * FROM pagamento;
+SELECT * FROM venda;
+SELECT * FROM log_venda;
+SELECT * FROM log_pagamento;
+
+
+CREATE OR REPLACE VIEW vw_estoque_parado AS
+SELECT
+    pr.categoria AS Categoria,
+    pr.nome AS Produto,
+    pr.referencia AS Codigo_Referencia,
+    e.quantidade AS Saldo_Estoque,
+    (e.quantidade * pr.preco) AS Valor_Financeiro_Paralisado
+FROM estoque e
+INNER JOIN produto pr
+    ON e.produtoId = pr.id
+WHERE e.quantidade < 50
+ORDER BY e.quantidade ASC;
+
+-- 01: todos os clientes e o que cada um comprou
+-- (quem nunca comprou aparece com a venda em NULL)
+CREATE OR REPLACE VIEW vw_clientes_e_compras AS
+SELECT
+    c.id AS cliente_id,
+    c.nome AS cliente,
+    v.id AS venda_id,
+    p.nome AS produto
+FROM clientes c
+         LEFT JOIN venda v
+                   ON v.clienteId = c.id
+         LEFT JOIN produto p
+                   ON p.id = v.produtoId;
+
+
+-- 02: clientes cadastrados que nunca fizeram uma compra
+CREATE OR REPLACE VIEW vw_clientes_sem_compra AS
+SELECT
+    c.id AS cliente_id,
+    c.nome AS cliente,
+    c.doc
+FROM clientes c
+         LEFT JOIN venda v
+                   ON v.clienteId = c.id
+WHERE v.id IS NULL;
+
+
+-- 03: produtos da mesma categoria com o mesmo preço
+CREATE OR REPLACE VIEW vw_produtos_mesmo_preco_categoria AS
+SELECT
+    p1.categoria,
+    p1.nome AS produto_1,
+    p2.nome AS produto_2,
+    p1.preco
+FROM produto p1
+         INNER JOIN produto p2
+                    ON p1.categoria = p2.categoria
+                        AND p1.preco = p2.preco
+                        AND p1.id < p2.id;
+
+
+-- 04: clientes sem compra e vendas sem cliente, juntos
+CREATE OR REPLACE VIEW vw_clientes_sem_compra_e_vendas_sem_cliente AS
+SELECT
+    c.id AS cliente_id,
+    c.nome AS cliente,
+    v.id AS venda_id
+FROM clientes c
+         LEFT JOIN venda v
+                   ON v.clienteId = c.id
+UNION
+SELECT
+    c.id AS cliente_id,
+    c.nome AS cliente,
+    v.id AS venda_id
+FROM clientes c
+         RIGHT JOIN venda v
+                    ON v.clienteId = c.id;
+
+
+-- 05: faturamento por categoria, só das que passaram de R$ 100
+CREATE OR REPLACE VIEW vw_faturamento_categorias_acima_100 AS
+SELECT
+    p.categoria,
+    COUNT(v.id) AS qtd_vendas,
+    SUM(p.preco) AS faturamento
+FROM venda v
+         INNER JOIN produto p
+                    ON p.id = v.produtoId
+GROUP BY p.categoria
+HAVING SUM(p.preco) > 100;
+
+
+-- 06: os 3 produtos mais caros da loja
+CREATE OR REPLACE VIEW vw_top3_produtos_mais_caros AS
+SELECT
+    nome AS produto,
+    categoria,
+    preco
+FROM produto
+ORDER BY preco DESC
+    LIMIT 3;
+
+
+-- 07: produtos com preço acima da média
+CREATE OR REPLACE VIEW vw_produtos_acima_media_preco AS
+SELECT
+    nome AS produto,
+    preco
+FROM produto
+WHERE preco > (SELECT AVG(preco) FROM produto);
+
+
+-- 08: comissão de cada vendedor sobre as vendas já pagas
+CREATE OR REPLACE VIEW vw_comissao_vendedor_vendas_pagas AS
+SELECT
+    ve.nome AS vendedor,
+    SUM(pr.preco) AS total_vendido,
+    SUM(pr.preco) * ve.comissao AS comissao
+FROM venda v
+INNER JOIN pagamento pg
+    ON pg.id = v.pagamentoId
+INNER JOIN produto pr
+    ON pr.id = v.produtoId
+INNER JOIN vendedor ve
+    ON ve.id = v.vendedorId
+WHERE pg.state = 'PAGO'
+GROUP BY ve.id, ve.nome, ve.comissao;
+
+
+-- 09: ranking de preço dentro de cada categoria
+-- (CAMISA e CAMISETA têm o mesmo preço e empatam)
+CREATE OR REPLACE VIEW vw_ranking_preco_por_categoria AS
+SELECT
+    p1.categoria,
+    p1.nome AS produto,
+    p1.preco,
+    (SELECT COUNT(*)
+     FROM produto p2
+     WHERE p2.categoria = p1.categoria
+       AND p2.preco > p1.preco) + 1 AS posicao
+FROM produto p1;
+
+
+-- 10: faturamento acumulado, venda após venda
+CREATE OR REPLACE VIEW vw_faturamento_acumulado_vendas AS
+SELECT
+    v.id AS venda_id,
+    p.nome AS produto,
+    p.preco,
+    (SELECT SUM(p2.preco)
+     FROM venda v2
+     INNER JOIN produto p2
+         ON p2.id = v2.produtoId
+     WHERE v2.id <= v.id) AS faturamento_acumulado
+FROM venda v
+INNER JOIN produto p
+    ON p.id = v.produtoId;
+
+
+DROP PROCEDURE IF EXISTS sp_popular_produto;
+DELIMITER %%
+
+CREATE PROCEDURE sp_popular_produto(IN carga INT)
+BEGIN
+    DECLARE i      INT    DEFAULT 0;
+    DECLARE ultimo BIGINT DEFAULT 0;
+
+    -- validação do parâmetro
+    IF carga IS NULL OR carga <= 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'carga deve ser maior que zero';
+    END IF;
+
+    -- maior ID atual (0 se a tabela estiver vazia)
+    SELECT COALESCE(MAX(id), 0) INTO ultimo FROM produto;
+
+    START TRANSACTION;
+
+    WHILE i < carga DO
+        SET i = i + 1;
+
+        INSERT INTO produto
+            (id, nome, preco, categoria, referencia)
+        SELECT
+            ultimo + i,                                      -- ID manual
+            CONCAT('Produto - ', ultimo + i),
+            ROUND(10 + RAND() * 90, 2),
+            ELT(FLOOR(1 + RAND() * 2), 'ROUPA', 'LANGERIE'),
+            10000000 + ultimo + i;
+    END WHILE;
+
+    COMMIT;
+END%%
+DELIMITER ;
+
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
+CALL sp_popular_produto(100000);
